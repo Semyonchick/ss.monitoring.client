@@ -73,3 +73,7 @@ sudo bash local/modules/ss.monitoring.client/tools/server-setup.sh
 ```text
 /srv/ss-monitoring/.ssh/authorized_keys
 ```
+
+## Лицензия
+
+Исходный код опубликован для просмотра, но не является open source. Использование, запуск, копирование, изменение, развёртывание и распространение без предварительного письменного разрешения правообладателя запрещены. Полные условия приведены в [LICENSE](LICENSE).
