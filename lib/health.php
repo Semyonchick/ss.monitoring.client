@@ -99,7 +99,7 @@ final class Health
   {
     $lastBackup = State::backupLastSuccess();
     return [
-      'status' => self::age($lastBackup, 108000, 172800),
+      'status' => self::age($lastBackup, 432000, 604800),
       'last_backup_at' => $lastBackup,
     ];
   }
