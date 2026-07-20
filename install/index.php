@@ -29,10 +29,17 @@ class ss_monitoring_client extends CModule
     $events = EventManager::getInstance();
     $events->unRegisterEventHandler('main', 'OnBeforeProlog', $this->MODULE_ID, 'Ss\\Monitoring\\Client\\HealthHandler', 'handle');
     $events->registerEventHandler('main', 'OnBeforeProlog', $this->MODULE_ID, 'Ss\\Monitoring\\Client\\HealthHandler', 'handle');
+    \CAgent::AddAgent(
+      '\\Ss\\Monitoring\\Client\\SchedulerAgent::run();',
+      $this->MODULE_ID,
+      'N',
+      300
+    );
   }
 
   public function DoUninstall()
   {
+    \CAgent::RemoveModuleAgents($this->MODULE_ID);
     EventManager::getInstance()->unRegisterEventHandler('main', 'OnBeforeProlog', $this->MODULE_ID, 'Ss\\Monitoring\\Client\\HealthHandler', 'handle');
     Option::delete($this->MODULE_ID);
     ModuleManager::unRegisterModule($this->MODULE_ID);

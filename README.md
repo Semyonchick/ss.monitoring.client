@@ -7,6 +7,7 @@
 Разместите репозиторий в `local/modules/ss.monitoring.client` и установите модуль в административной части Bitrix. При установке модуль:
 
 - регистрирует обработчик `main:OnBeforeProlog` для `GET /monitoring/health`;
+- регистрирует постоянный агент Bitrix, который каждые 300 секунд обновляет heartbeat планировщика;
 - создаёт случайный токен в настройках Bitrix;
 - не копирует файлы в остальные каталоги проекта.
 
@@ -41,15 +42,9 @@ X-Monitoring-Token: <token>
 echo \Bitrix\Main\Config\Option::get('ss.monitoring.client', 'token') . PHP_EOL;
 ```
 
-После успешного выполнения основного cron проекта зарегистрируйте отметку одним из способов:
+Отметку `scheduler_last_success_at` автоматически обновляет постоянный агент модуля. Если очередь агентов Bitrix перестанет обрабатываться, heartbeat протухнет и мониторинг поднимет тревогу.
 
-```php
-\Ss\Monitoring\Client\State::schedulerSuccess();
-```
-
-```bash
-php local/modules/ss.monitoring.client/tools/mark.php scheduler-success
-```
+Чтобы heartbeat контролировал именно системный cron, а не посещения сайта, настройте выполнение агентов Bitrix только через cron.
 
 ## Серверные резервные копии
 
