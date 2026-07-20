@@ -60,7 +60,8 @@ sudo bash local/modules/ss.monitoring.client/tools/server-setup.sh
 - создаёт SFTP-only пользователя `ssbackup` без IP-ограничений;
 - хранит архивы вне сайта в `/srv/ss-monitoring/backups`;
 - показывает этот каталог внутри SFTP-chroot как `/backups` только для чтения;
-- резервирует MySQL/MariaDB, `upload` и настройки Bitrix;
+- резервирует MySQL/MariaDB и весь каталог сайта;
+- исключает кеши Bitrix, локальные бэкапы, временные файлы, `upload/resize_cache` и `upload/dev2fun.imagecompress`;
 - создаёт SHA-256 manifest для каждой копии и хранит две последние пары архивов и manifest.
 
 Окружение должно предоставлять `mysqldump`, `tar`, `zstd` и PHP CLI. После запуска остаётся только добавить публичный ключ Synology в:

@@ -15,8 +15,27 @@ Loader::includeModule('ss.monitoring.client');
 umask(0027);
 
 $backupDir = getenv('SS_MONITORING_BACKUP_DIR') ?: '/srv/ss-monitoring/backups';
-$uploadDir = getenv('SS_MONITORING_UPLOAD_DIR') ?: $_SERVER['DOCUMENT_ROOT'] . '/upload';
-$siteName = preg_replace('/[^a-z0-9-]+/i', '-', basename($_SERVER['DOCUMENT_ROOT']));
+$siteRoot = rtrim($_SERVER['DOCUMENT_ROOT'], DIRECTORY_SEPARATOR);
+$siteParent = dirname($siteRoot);
+$siteDirectory = basename($siteRoot);
+$siteUploadPath = $siteRoot . '/upload';
+$uploadDir = getenv('SS_MONITORING_UPLOAD_DIR') ?: $siteUploadPath;
+$uploadExcludedPaths = [
+  'backup',
+  'dev2fun.imagecompress',
+  'resize_cache',
+  'tmp',
+];
+$excludedSitePaths = [
+  'bitrix/backup',
+  'bitrix/cache',
+  'bitrix/html_pages',
+  'bitrix/managed_cache',
+  'bitrix/stack_cache',
+  'bitrix/tmp',
+  ...array_map(static fn(string $path): string => 'upload/' . $path, $uploadExcludedPaths),
+];
+$siteName = preg_replace('/[^a-z0-9-]+/i', '-', $siteDirectory);
 $timestamp = (new DateTimeImmutable('now'))->format('Ymd-His');
 $id = $siteName . '-' . $timestamp;
 $archiveName = $id . '.tar.zst';
@@ -49,13 +68,15 @@ function ssMonitoringRemoveDirectory(string $directory): void
 
 try {
   if (!is_dir($backupDir) || !is_writable($backupDir)) throw new RuntimeException('Backup directory is unavailable.');
+  if (!is_dir($siteRoot)) throw new RuntimeException('Bitrix site directory is unavailable.');
+  if (!is_dir($uploadDir)) throw new RuntimeException('Bitrix upload directory is unavailable.');
   $lock = fopen($lockFile, 'c');
   if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
     throw new RuntimeException('A backup is already running.');
   }
-  if (!mkdir($temporaryDir, 0700) && !is_dir($temporaryDir)) throw new RuntimeException('Unable to create temporary directory.');
-  mkdir($temporaryDir . '/config', 0700);
-
+  if (!mkdir($temporaryDir, 0700) && !is_dir($temporaryDir)) {
+    throw new RuntimeException('Unable to create temporary directory.');
+  }
   $connection = Application::getConnection();
   $database = $connection->getConfiguration();
   foreach (['host', 'database', 'login', 'password'] as $key) {
@@ -63,31 +84,75 @@ try {
   }
 
   $credentials = $temporaryDir . '/mysql.cnf';
-  $mysqlConfig = "[client]\nhost=" . $database['host'] . "\nuser=" . $database['login'] . "\npassword=" . $database['password'] . "\n";
+  $mysqlConfig = "[client]\n" .
+    'host=' . $database['host'] . "\n" .
+    'user=' . $database['login'] . "\n" .
+    'password=' . $database['password'] . "\n";
   if (!empty($database['port'])) $mysqlConfig .= 'port=' . (int)$database['port'] . "\n";
   file_put_contents($credentials, $mysqlConfig, LOCK_EX);
   chmod($credentials, 0600);
-  ssMonitoringRun('mysqldump --defaults-extra-file=' . escapeshellarg($credentials) . ' --single-transaction --quick --routines --events --triggers ' . escapeshellarg($database['database']), $temporaryDir . '/database.sql');
+  $dumpCommand = 'mysqldump --defaults-extra-file=' . escapeshellarg($credentials) .
+    ' --single-transaction --quick --routines --events --triggers ' . escapeshellarg($database['database']);
+  ssMonitoringRun($dumpCommand, $temporaryDir . '/database.sql');
   @unlink($credentials);
 
-  foreach (['bitrix/.settings.php', 'bitrix/.settings_extra.php', 'local/php_interface'] as $path) {
-    $source = $_SERVER['DOCUMENT_ROOT'] . '/' . $path;
-    if (file_exists($source)) ssMonitoringRun('cp -a ' . escapeshellarg($source) . ' ' . escapeshellarg($temporaryDir . '/config/'));
-  }
-  if (!is_dir($uploadDir)) throw new RuntimeException('Bitrix upload directory is unavailable.');
-  mkdir($temporaryDir . '/uploads', 0700);
-  ssMonitoringRun('cp -a ' . escapeshellarg($uploadDir) . ' ' . escapeshellarg($temporaryDir . '/uploads/upload'));
-  file_put_contents($temporaryDir . '/versions.json', json_encode(['php' => PHP_VERSION, 'created_at' => (new DateTimeImmutable('now'))->format(DATE_ATOM)], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
+  $versions = [
+    'php' => PHP_VERSION,
+    'created_at' => (new DateTimeImmutable('now'))->format(DATE_ATOM),
+  ];
+  file_put_contents(
+    $temporaryDir . '/versions.json',
+    json_encode($versions, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+  );
 
-  ssMonitoringRun('tar -C ' . escapeshellarg($temporaryDir) . ' -cf - database.sql uploads config versions.json | zstd -T0 -q -o ' . escapeshellarg($archivePath . '.tmp'));
+  $excludeArguments = implode(' ', array_map(
+    static fn(string $path): string => '--exclude=' . escapeshellarg($siteDirectory . '/' . $path),
+    $excludedSitePaths
+  ));
+  $archiveSources = 'tar -C ' . escapeshellarg($temporaryDir) . ' -cf - database.sql versions.json' .
+    ' -C ' . escapeshellarg($siteParent) . ' ' . $excludeArguments . ' ' . escapeshellarg($siteDirectory);
+  $manifestContents = ['database', 'site'];
+  $externalUploadDirectory = null;
+  if (is_link($siteUploadPath)) {
+    $externalUploadDirectory = basename($uploadDir);
+    $uploadExcludeArguments = implode(' ', array_map(
+      static fn(string $path): string => '--exclude=' . escapeshellarg($externalUploadDirectory . '/' . $path),
+      $uploadExcludedPaths
+    ));
+    $archiveSources .= ' -C ' . escapeshellarg(dirname($uploadDir)) . ' ' . $uploadExcludeArguments .
+      ' ' . escapeshellarg($externalUploadDirectory);
+    $manifestContents[] = 'external_upload';
+  }
+  $archiveCommand = $archiveSources . ' | zstd -T0 -q -o ' . escapeshellarg($archivePath . '.tmp');
+  ssMonitoringRun($archiveCommand);
   ssMonitoringRun('zstd -tq ' . escapeshellarg($archivePath . '.tmp'));
-  if (!rename($archivePath . '.tmp', $archivePath)) throw new RuntimeException('Unable to publish backup archive.');
-  $manifest = ['id' => $id, 'created_at' => (new DateTimeImmutable('now'))->format(DATE_ATOM), 'file' => $archiveName, 'size_bytes' => filesize($archivePath), 'sha256' => hash_file('sha256', $archivePath), 'contents' => ['database', 'uploads', 'config']];
+  if (!rename($archivePath . '.tmp', $archivePath)) {
+    throw new RuntimeException('Unable to publish backup archive.');
+  }
+  $manifest = [
+    'id' => $id,
+    'created_at' => (new DateTimeImmutable('now'))->format(DATE_ATOM),
+    'file' => $archiveName,
+    'size_bytes' => filesize($archivePath),
+    'sha256' => hash_file('sha256', $archivePath),
+    'contents' => $manifestContents,
+    'site_directory' => $siteDirectory,
+    'excluded_site_paths' => $excludedSitePaths,
+  ];
+  if ($externalUploadDirectory !== null) {
+    $manifest['external_upload_directory'] = $externalUploadDirectory;
+  }
   $manifestJson = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
-  if (file_put_contents($manifestPath . '.tmp', $manifestJson, LOCK_EX) === false || !rename($manifestPath . '.tmp', $manifestPath)) {
+  if (
+    file_put_contents($manifestPath . '.tmp', $manifestJson, LOCK_EX) === false ||
+    !rename($manifestPath . '.tmp', $manifestPath)
+  ) {
     throw new RuntimeException('Unable to publish backup manifest.');
   }
-  if (file_put_contents($backupDir . '/manifest.json.tmp', $manifestJson, LOCK_EX) === false || !rename($backupDir . '/manifest.json.tmp', $backupDir . '/manifest.json')) {
+  if (
+    file_put_contents($backupDir . '/manifest.json.tmp', $manifestJson, LOCK_EX) === false ||
+    !rename($backupDir . '/manifest.json.tmp', $backupDir . '/manifest.json')
+  ) {
     throw new RuntimeException('Unable to publish current backup manifest.');
   }
 
