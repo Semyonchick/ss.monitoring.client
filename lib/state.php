@@ -2,6 +2,7 @@
 
 namespace Ss\Monitoring\Client;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 
 final class State
@@ -30,8 +31,14 @@ final class State
 
   private static function read(string $name): ?string
   {
-    $value = Option::get(self::MODULE_ID, $name, '');
-    return $value !== '' ? $value : null;
+    $connection = Application::getConnection();
+    $helper = $connection->getSqlHelper();
+    $moduleId = $helper->forSql(self::MODULE_ID);
+    $optionName = $helper->forSql($name);
+    $value = $connection->queryScalar(
+      "SELECT VALUE FROM b_option WHERE MODULE_ID = '{$moduleId}' AND NAME = '{$optionName}'"
+    );
+    return is_string($value) && $value !== '' ? $value : null;
   }
 
   private static function now(): string
