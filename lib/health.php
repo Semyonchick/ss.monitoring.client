@@ -22,6 +22,8 @@ final class Health
       return;
     }
 
+    SchedulerAgent::ensureRegistered();
+
     $database = self::database();
     $disk = self::disk();
     $scheduler = self::scheduler();

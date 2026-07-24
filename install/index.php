@@ -29,12 +29,8 @@ class ss_monitoring_client extends CModule
     $events = EventManager::getInstance();
     $events->unRegisterEventHandler('main', 'OnBeforeProlog', $this->MODULE_ID, 'Ss\\Monitoring\\Client\\HealthHandler', 'handle');
     $events->registerEventHandler('main', 'OnBeforeProlog', $this->MODULE_ID, 'Ss\\Monitoring\\Client\\HealthHandler', 'handle');
-    \CAgent::AddAgent(
-      '\\Ss\\Monitoring\\Client\\SchedulerAgent::run();',
-      $this->MODULE_ID,
-      'N',
-      300
-    );
+    \Bitrix\Main\Loader::includeModule($this->MODULE_ID);
+    \Ss\Monitoring\Client\SchedulerAgent::ensureRegistered();
   }
 
   public function DoUninstall()
