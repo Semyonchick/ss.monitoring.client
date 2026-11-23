@@ -92,7 +92,7 @@ final class Health
   private static function scheduler(): array
   {
     $lastSuccess = State::schedulerLastSuccess();
-    return ['status' => self::age($lastSuccess, 300), 'last_success_at' => $lastSuccess];
+    return ['status' => self::age($lastSuccess, 600, 1200), 'last_success_at' => $lastSuccess];
   }
 
   private static function backup(): array
@@ -114,7 +114,7 @@ final class Health
     }
     $critical = $critical ?? $warning * 4;
     if ($seconds > $critical) return self::CRITICAL;
-    if ($seconds > $warning * 2) return self::WARNING;
+    if ($seconds > $warning) return self::WARNING;
     return self::OK;
   }
 
@@ -205,6 +205,13 @@ final class Health
 
   private static function send(int $code, array $data): void
   {
+    $reasons = [200 => 'OK', 403 => 'Forbidden', 405 => 'Method Not Allowed', 500 => 'Internal Server Error'];
+    $status = $code . ' ' . $reasons[$code];
+    // urlrewrite may have entered 404.php before OnBeforeProlog. Reset all
+    // status sources, including the CGI Status header and Bitrix response.
+    header_remove('Status');
+    Application::getInstance()->getContext()->getResponse()->setStatus($status);
+    \CHTTP::SetStatus($status);
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
